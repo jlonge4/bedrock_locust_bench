@@ -113,18 +113,23 @@ def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, s
                     'requests_per_sec': df['Requests/s'].iloc[0],
                 }
                 
-                # Read token statistics from JSONL file
+                # Read token statistics from JSONL file for this specific test
                 token_file = RESULTS_DIR / 'token_data.jsonl'
                 if token_file.exists():
                     try:
                         input_tokens = []
                         output_tokens = []
                         
+                        # Read only tokens from the current test configuration
                         with open(token_file, 'r') as f:
                             for line in f:
                                 token_record = json.loads(line.strip())
-                                input_tokens.append(token_record['input_tokens'])
-                                output_tokens.append(token_record['output_tokens'])
+                                # Match this test's configuration
+                                if (token_record.get('region_prefix') == region_prefix and
+                                    token_record.get('service_tier') == service_tier and
+                                    token_record.get('prompt_size') == prompt_size):
+                                    input_tokens.append(token_record['input_tokens'])
+                                    output_tokens.append(token_record['output_tokens'])
                         
                         if input_tokens:
                             metrics['avg_input_tokens'] = sum(input_tokens) / len(input_tokens)
@@ -136,9 +141,6 @@ def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, s
                             metrics['avg_output_tokens'] = 0
                             metrics['total_input_tokens'] = 0
                             metrics['total_output_tokens'] = 0
-                        
-                        # Clean up token file for next test
-                        token_file.unlink()
                     except Exception as e:
                         print(f"Could not read token stats: {e}")
                         metrics['avg_input_tokens'] = 0
