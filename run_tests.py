@@ -17,7 +17,6 @@ import pandas as pd
 from itertools import product
 
 # Configuration
-REGION_PREFIXES = ['us', 'global']
 SERVICE_TIERS = ['default', 'priority', 'flex']
 PROMPT_SIZES = ['small', 'medium', 'large']
 USER_COUNTS = [30, 60, 90]  # Concurrent users
@@ -165,16 +164,18 @@ def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, s
         return None
 
 
-def generate_comparison_charts(results_df):
+def generate_comparison_charts(results_df, region_prefixes):
     """Generate matplotlib charts comparing latency metrics across permutations."""
     
     print("\nGenerating comparison charts...")
     
     # 1. Chart: Average Latency by Service Tier (grouped by region and prompt size)
-    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+    fig, axes = plt.subplots(len(region_prefixes), 3, figsize=(18, 6 * len(region_prefixes)))
+    if len(region_prefixes) == 1:
+        axes = axes.reshape(1, -1)
     fig.suptitle('Average Response Time by Configuration', fontsize=16, fontweight='bold')
     
-    for idx, region in enumerate(REGION_PREFIXES):
+    for idx, region in enumerate(region_prefixes):
         for jdx, prompt_size in enumerate(PROMPT_SIZES):
             ax = axes[idx][jdx]
             
@@ -296,13 +297,13 @@ def generate_comparison_charts(results_df):
     print(f"  ✓ Saved: {CHARTS_DIR / 'throughput_comparison.png'}")
     
     # 5. Heatmap: Average Latency across all dimensions
-    fig, axes = plt.subplots(len(REGION_PREFIXES), 1, figsize=(14, 10))
-    if len(REGION_PREFIXES) == 1:
+    fig, axes = plt.subplots(len(region_prefixes), 1, figsize=(14, 5 * len(region_prefixes)))
+    if len(region_prefixes) == 1:
         axes = [axes]
     
     fig.suptitle('Latency Heatmap: Service Tier vs Prompt Size', fontsize=16, fontweight='bold')
     
-    for idx, region in enumerate(REGION_PREFIXES):
+    for idx, region in enumerate(region_prefixes):
         ax = axes[idx]
         
         # Create pivot table for heatmap
@@ -350,7 +351,11 @@ def main():
     print("="*80)
     
     # Get model ID from environment or use default
-    base_model_id = os.getenv('BASE_MODEL_ID', 'anthropic.claude-3-5-sonnet-20241022-v2:0')
+    base_model_id = os.getenv('BASE_MODEL_ID', 'amazon.nova-premier-v1:0')
+    
+    # Optional: Configure region prefixes
+    region_prefixes_env = os.getenv('REGION_PREFIXES', 'us')
+    region_prefixes = [x.strip() for x in region_prefixes_env.split(',')]
     
     # Optional: Configure user counts
     user_counts_env = os.getenv('USER_COUNTS')
@@ -361,7 +366,7 @@ def main():
     
     print(f"\nConfiguration:")
     print(f"  Base Model ID: {base_model_id}")
-    print(f"  Region Prefixes: {REGION_PREFIXES}")
+    print(f"  Region Prefixes: {region_prefixes}")
     print(f"  Service Tiers: {SERVICE_TIERS}")
     print(f"  Prompt Sizes: {PROMPT_SIZES}")
     print(f"  User Counts: {user_counts}")
@@ -373,7 +378,7 @@ def main():
     setup_directories()
     
     # Generate all permutations
-    permutations = list(product(REGION_PREFIXES, SERVICE_TIERS, PROMPT_SIZES, user_counts))
+    permutations = list(product(region_prefixes, SERVICE_TIERS, PROMPT_SIZES, user_counts))
     total_tests = len(permutations)
     
     print(f"Total test permutations: {total_tests}")
@@ -446,7 +451,7 @@ def main():
         print(results_df.groupby('service_tier')['avg_output_tokens'].mean().to_string())
         
         # Generate charts
-        generate_comparison_charts(results_df)
+        generate_comparison_charts(results_df, region_prefixes)
         
         print(f"\n{'='*80}")
         print(f"Results saved to: {RESULTS_DIR}")
