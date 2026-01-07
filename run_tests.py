@@ -112,41 +112,84 @@ def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, s
                     'requests_per_sec': df['Requests/s'].iloc[0],
                 }
                 
-                # Read token statistics from JSONL file for this specific test
+                # Read token statistics from JSONL file for this specific test (only successful requests)
                 token_file = RESULTS_DIR / 'token_data.jsonl'
                 if token_file.exists():
                     try:
                         input_tokens = []
                         output_tokens = []
+                        response_times = []
                         
-                        # Read only tokens from the current test configuration
+                        # Read only tokens from successful requests in the current test configuration
                         with open(token_file, 'r') as f:
                             for line in f:
                                 token_record = json.loads(line.strip())
-                                # Match this test's configuration
+                                # Match this test's configuration and only include successful requests
                                 if (token_record.get('region_prefix') == region_prefix and
                                     token_record.get('service_tier') == service_tier and
-                                    token_record.get('prompt_size') == prompt_size):
+                                    token_record.get('prompt_size') == prompt_size and
+                                    token_record.get('success', True)):  # Only successful requests
                                     input_tokens.append(token_record['input_tokens'])
                                     output_tokens.append(token_record['output_tokens'])
+                                    response_times.append(token_record.get('response_time_ms', 0))
                         
-                        if input_tokens:
+                        if input_tokens and response_times:
+                            # Calculate success-only metrics
+                            response_times.sort()
+                            n = len(response_times)
+                            
+                            metrics['success_count'] = n
+                            metrics['success_avg_response_time'] = sum(response_times) / n
+                            metrics['success_min_response_time'] = min(response_times)
+                            metrics['success_max_response_time'] = max(response_times)
+                            metrics['success_p50'] = response_times[int(n * 0.5)]
+                            metrics['success_p95'] = response_times[int(n * 0.95)] if n > 1 else response_times[0]
+                            metrics['success_p99'] = response_times[int(n * 0.99)] if n > 1 else response_times[0]
+                            
                             metrics['avg_input_tokens'] = sum(input_tokens) / len(input_tokens)
                             metrics['avg_output_tokens'] = sum(output_tokens) / len(output_tokens)
                             metrics['total_input_tokens'] = sum(input_tokens)
                             metrics['total_output_tokens'] = sum(output_tokens)
                         else:
+                            metrics['success_count'] = 0
+                            metrics['success_avg_response_time'] = 0
+                            metrics['success_min_response_time'] = 0
+                            metrics['success_max_response_time'] = 0
+                            metrics['success_p50'] = 0
+                            metrics['success_p95'] = 0
+                            metrics['success_p99'] = 0
+                            metrics['success_count'] = 0
+                            metrics['success_avg_response_time'] = 0
+                            metrics['success_min_response_time'] = 0
+                            metrics['success_max_response_time'] = 0
+                            metrics['success_p50'] = 0
+                            metrics['success_p95'] = 0
+                            metrics['success_p99'] = 0
                             metrics['avg_input_tokens'] = 0
                             metrics['avg_output_tokens'] = 0
                             metrics['total_input_tokens'] = 0
                             metrics['total_output_tokens'] = 0
                     except Exception as e:
                         print(f"Could not read token stats: {e}")
+                        metrics['success_count'] = 0
+                        metrics['success_avg_response_time'] = 0
+                        metrics['success_min_response_time'] = 0
+                        metrics['success_max_response_time'] = 0
+                        metrics['success_p50'] = 0
+                        metrics['success_p95'] = 0
+                        metrics['success_p99'] = 0
                         metrics['avg_input_tokens'] = 0
                         metrics['avg_output_tokens'] = 0
                         metrics['total_input_tokens'] = 0
                         metrics['total_output_tokens'] = 0
                 else:
+                    metrics['success_count'] = 0
+                    metrics['success_avg_response_time'] = 0
+                    metrics['success_min_response_time'] = 0
+                    metrics['success_max_response_time'] = 0
+                    metrics['success_p50'] = 0
+                    metrics['success_p95'] = 0
+                    metrics['success_p99'] = 0
                     metrics['avg_input_tokens'] = 0
                     metrics['avg_output_tokens'] = 0
                     metrics['total_input_tokens'] = 0
@@ -188,7 +231,7 @@ def generate_comparison_charts(results_df, region_prefixes):
             if not data.empty:
                 # Group by service tier and users
                 pivot = data.pivot_table(
-                    values='avg_response_time',
+                    values='success_avg_response_time',
                     index='service_tier',
                     columns='users',
                     aggfunc='mean'
@@ -196,7 +239,7 @@ def generate_comparison_charts(results_df, region_prefixes):
                 
                 pivot.plot(kind='bar', ax=ax, rot=0)
                 ax.set_title(f'{region.upper()} - {prompt_size.capitalize()}')
-                ax.set_ylabel('Avg Response Time (ms)')
+                ax.set_ylabel('Avg Response Time (ms) - Success Only')
                 ax.set_xlabel('Service Tier')
                 ax.legend(title='Users', loc='upper left')
                 ax.grid(axis='y', alpha=0.3)
@@ -217,18 +260,18 @@ def generate_comparison_charts(results_df, region_prefixes):
         if not data.empty:
             # Group by service tier and region
             grouped = data.groupby(['service_tier', 'region_prefix']).agg({
-                'p50': 'mean',
-                'p95': 'mean'
+                'success_p50': 'mean',
+                'success_p95': 'mean'
             }).reset_index()
             
             x = range(len(grouped))
             width = 0.35
             
-            bars1 = ax.bar([i - width/2 for i in x], grouped['p50'], width, label='P50', alpha=0.8)
-            bars2 = ax.bar([i + width/2 for i in x], grouped['p95'], width, label='P95', alpha=0.8)
+            bars1 = ax.bar([i - width/2 for i in x], grouped['success_p50'], width, label='P50', alpha=0.8)
+            bars2 = ax.bar([i + width/2 for i in x], grouped['success_p95'], width, label='P95', alpha=0.8)
             
             ax.set_xlabel('Configuration')
-            ax.set_ylabel('Response Time (ms)')
+            ax.set_ylabel('Response Time (ms) - Success Only')
             ax.set_title(f'{prompt_size.capitalize()} Prompts')
             ax.set_xticks(x)
             ax.set_xticklabels([f"{row['service_tier']}\n({row['region_prefix']})" 
@@ -245,7 +288,7 @@ def generate_comparison_charts(results_df, region_prefixes):
     
     # Group by prompt size and service tier
     pivot = results_df.pivot_table(
-        values=['avg_response_time', 'p50', 'p95'],
+        values=['success_avg_response_time', 'success_p50', 'success_p95'],
         index='prompt_size',
         columns='service_tier',
         aggfunc='mean'
@@ -254,7 +297,7 @@ def generate_comparison_charts(results_df, region_prefixes):
     x = range(len(PROMPT_SIZES))
     width = 0.25
     
-    for idx, metric in enumerate(['avg_response_time', 'p50', 'p95']):
+    for idx, metric in enumerate(['success_avg_response_time', 'success_p50', 'success_p95']):
         if metric in pivot.columns.levels[0]:
             offset = (idx - 1) * width
             for jdx, tier in enumerate(SERVICE_TIERS):
@@ -309,7 +352,7 @@ def generate_comparison_charts(results_df, region_prefixes):
         # Create pivot table for heatmap
         data = results_df[results_df['region_prefix'] == region]
         pivot = data.pivot_table(
-            values='avg_response_time',
+            values='success_avg_response_time',
             index='service_tier',
             columns='prompt_size',
             aggfunc='mean'
@@ -430,19 +473,23 @@ def main():
         
         # Print summary statistics
         print("\n" + "="*80)
-        print("SUMMARY STATISTICS")
+        print("SUMMARY STATISTICS (SUCCESS REQUESTS ONLY)")
         print("="*80)
         print("\nAverage Response Time by Service Tier:")
-        print(results_df.groupby('service_tier')['avg_response_time'].mean().to_string())
+        print(results_df.groupby('service_tier')['success_avg_response_time'].mean().to_string())
         
         print("\nAverage Response Time by Prompt Size:")
-        print(results_df.groupby('prompt_size')['avg_response_time'].mean().to_string())
+        print(results_df.groupby('prompt_size')['success_avg_response_time'].mean().to_string())
         
         print("\nAverage Response Time by Region:")
-        print(results_df.groupby('region_prefix')['avg_response_time'].mean().to_string())
+        print(results_df.groupby('region_prefix')['success_avg_response_time'].mean().to_string())
         
         print("\nP95 Latency by Service Tier:")
-        print(results_df.groupby('service_tier')['p95'].mean().to_string())
+        print(results_df.groupby('service_tier')['success_p95'].mean().to_string())
+        
+        print("\nSuccess Rate by Configuration:")
+        results_df['success_rate'] = (results_df['success_count'] / results_df['total_requests'] * 100).round(2)
+        print(results_df.groupby(['region_prefix', 'service_tier', 'prompt_size'])['success_rate'].mean().to_string())
         
         print("\nAverage Input Tokens by Prompt Size:")
         print(results_df.groupby('prompt_size')['avg_input_tokens'].mean().to_string())

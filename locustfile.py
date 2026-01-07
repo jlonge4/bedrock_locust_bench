@@ -112,38 +112,30 @@ class BedrockUser(User):
         request_name = f"[{self.region_prefix}][{self.service_tier or 'none'}][{self.prompt_size}]"
         
         with self.environment.events.request.measure("Converse", request_name):
-            try:
-                response, token_usage = generate_conversation(
-                    self.bedrock_client,
-                    self.model_id,
-                    self.messages,
-                    self.service_tier
-                )
-                
-                logger.debug(f"Response: {response['output']['message']['content'][0]['text'][:100]}...")
-                
-                # Write token data to file immediately after each request
-                token_file = Path('test_results') / 'token_data.jsonl'
-                token_file.parent.mkdir(exist_ok=True)
-                
-                token_record = {
-                    'timestamp': time.time(),
-                    'region_prefix': self.region_prefix,
-                    'service_tier': self.service_tier or 'none',
-                    'prompt_size': self.prompt_size,
-                    'input_tokens': token_usage['inputTokens'],
-                    'output_tokens': token_usage['outputTokens'],
-                    'total_tokens': token_usage['totalTokens']
-                }
-                
-                # Append to JSONL file (one JSON object per line)
-                with open(token_file, 'a') as f:
-                    f.write(json.dumps(token_record) + '\n')
-                
-            except ClientError as err:
-                message = err.response['Error']['Message']
-                logger.error("A client error occurred: %s", message)
-                raise
-            except Exception as e:
-                logger.error(f"An error occurred: {e}")
-                raise
+            response, token_usage = generate_conversation(
+                self.bedrock_client,
+                self.model_id,
+                self.messages,
+                self.service_tier
+            )
+            
+            logger.debug(f"Response: {response['output']['message']['content'][0]['text'][:100]}...")
+            
+            # Write token data to file immediately after each successful request
+            # (only successful requests reach here since exceptions bubble up)
+            token_file = Path('test_results') / 'token_data.jsonl'
+            token_file.parent.mkdir(exist_ok=True)
+            
+            token_record = {
+                'timestamp': time.time(),
+                'region_prefix': self.region_prefix,
+                'service_tier': self.service_tier or 'none',
+                'prompt_size': self.prompt_size,
+                'input_tokens': token_usage['inputTokens'],
+                'output_tokens': token_usage['outputTokens'],
+                'total_tokens': token_usage['totalTokens']
+            }
+            
+            # Append to JSONL file (one JSON object per line)
+            with open(token_file, 'a') as f:
+                f.write(json.dumps(token_record) + '\n')
