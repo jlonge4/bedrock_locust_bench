@@ -1,0 +1,2 @@
+Method,Name,Error,Occurrences
+Converse,[us][default][small],"ThrottlingException('An error occurred (ThrottlingException) when calling the Converse operation (reached max retries: 4): Too many requests, please wait before trying again.')",379

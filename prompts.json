@@ -1,0 +1,14 @@
+{
+  "small": {
+    "text": "What is machine learning?",
+    "description": "Small prompt - simple question (~5 words)"
+  },
+  "medium": {
+    "text": "Explain the concept of machine learning and artificial intelligence. Describe how neural networks work, including the role of layers, activation functions, and backpropagation. Provide examples of common use cases in industry today.",
+    "description": "Medium prompt - detailed explanation request (~40 words)"
+  },
+  "large": {
+    "text": "Provide a comprehensive analysis of modern machine learning architectures and their applications in enterprise environments. Begin with an overview of supervised, unsupervised, and reinforcement learning paradigms. Then, delve into the technical details of transformer architectures, explaining self-attention mechanisms, positional encodings, and multi-head attention. Discuss the training process including gradient descent optimization, learning rate scheduling, and regularization techniques like dropout and weight decay. Compare and contrast different model architectures such as BERT, GPT, and T5, highlighting their strengths and weaknesses for various natural language processing tasks. Include practical considerations for deploying these models in production, covering topics like model quantization, inference optimization, distributed training strategies, and cost management. Finally, explore emerging trends in the field including few-shot learning, prompt engineering, retrieval-augmented generation, and multimodal models that can process both text and images.",
+    "description": "Large prompt - extensive analysis request (~150 words)"
+  }
+}
