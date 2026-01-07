@@ -3,6 +3,8 @@ import logging
 import boto3
 import os
 import json
+import time
+from pathlib import Path
 
 from botocore.client import Config
 from botocore.exceptions import ClientError
@@ -59,7 +61,7 @@ def generate_conversation(bedrock_client, model_id, messages, service_tier=None)
     logger.info("Total tokens: %s", token_usage['totalTokens'])
     logger.info("Stop reason: %s", response['stopReason'])
 
-    return response
+    return response, token_usage
 
 
 class BedrockUser(User):
@@ -111,7 +113,7 @@ class BedrockUser(User):
         
         with self.environment.events.request.measure("Converse", request_name):
             try:
-                response = generate_conversation(
+                response, token_usage = generate_conversation(
                     self.bedrock_client,
                     self.model_id,
                     self.messages,
@@ -119,6 +121,24 @@ class BedrockUser(User):
                 )
                 
                 logger.debug(f"Response: {response['output']['message']['content'][0]['text'][:100]}...")
+                
+                # Write token data to file immediately after each request
+                token_file = Path('test_results') / 'token_data.jsonl'
+                token_file.parent.mkdir(exist_ok=True)
+                
+                token_record = {
+                    'timestamp': time.time(),
+                    'region_prefix': self.region_prefix,
+                    'service_tier': self.service_tier or 'none',
+                    'prompt_size': self.prompt_size,
+                    'input_tokens': token_usage['inputTokens'],
+                    'output_tokens': token_usage['outputTokens'],
+                    'total_tokens': token_usage['totalTokens']
+                }
+                
+                # Append to JSONL file (one JSON object per line)
+                with open(token_file, 'a') as f:
+                    f.write(json.dumps(token_record) + '\n')
                 
             except ClientError as err:
                 message = err.response['Error']['Message']

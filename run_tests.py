@@ -112,6 +112,45 @@ def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, s
                     'p99': df['99%'].iloc[0] if '99%' in df.columns else None,
                     'requests_per_sec': df['Requests/s'].iloc[0],
                 }
+                
+                # Read token statistics from JSONL file
+                token_file = RESULTS_DIR / 'token_data.jsonl'
+                if token_file.exists():
+                    try:
+                        input_tokens = []
+                        output_tokens = []
+                        
+                        with open(token_file, 'r') as f:
+                            for line in f:
+                                token_record = json.loads(line.strip())
+                                input_tokens.append(token_record['input_tokens'])
+                                output_tokens.append(token_record['output_tokens'])
+                        
+                        if input_tokens:
+                            metrics['avg_input_tokens'] = sum(input_tokens) / len(input_tokens)
+                            metrics['avg_output_tokens'] = sum(output_tokens) / len(output_tokens)
+                            metrics['total_input_tokens'] = sum(input_tokens)
+                            metrics['total_output_tokens'] = sum(output_tokens)
+                        else:
+                            metrics['avg_input_tokens'] = 0
+                            metrics['avg_output_tokens'] = 0
+                            metrics['total_input_tokens'] = 0
+                            metrics['total_output_tokens'] = 0
+                        
+                        # Clean up token file for next test
+                        token_file.unlink()
+                    except Exception as e:
+                        print(f"Could not read token stats: {e}")
+                        metrics['avg_input_tokens'] = 0
+                        metrics['avg_output_tokens'] = 0
+                        metrics['total_input_tokens'] = 0
+                        metrics['total_output_tokens'] = 0
+                else:
+                    metrics['avg_input_tokens'] = 0
+                    metrics['avg_output_tokens'] = 0
+                    metrics['total_input_tokens'] = 0
+                    metrics['total_output_tokens'] = 0
+                
                 return metrics
         
         print(f"Warning: Could not parse stats from {stats_file}")
@@ -397,6 +436,12 @@ def main():
         
         print("\nP95 Latency by Service Tier:")
         print(results_df.groupby('service_tier')['p95'].mean().to_string())
+        
+        print("\nAverage Input Tokens by Prompt Size:")
+        print(results_df.groupby('prompt_size')['avg_input_tokens'].mean().to_string())
+        
+        print("\nAverage Output Tokens by Service Tier:")
+        print(results_df.groupby('service_tier')['avg_output_tokens'].mean().to_string())
         
         # Generate charts
         generate_comparison_charts(results_df)
