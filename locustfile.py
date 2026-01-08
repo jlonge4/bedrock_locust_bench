@@ -1,4 +1,4 @@
-from locust import User, task, between
+from locust import User, task, between, events
 import logging
 import boto3
 import os
@@ -111,7 +111,10 @@ class BedrockUser(User):
         # Create a descriptive name for the request
         request_name = f"[{self.region_prefix}][{self.service_tier or 'none'}][{self.prompt_size}]"
         
-        with self.environment.events.request.measure("Converse", request_name):
+        start_time = time.time()
+        exception = None
+        
+        try:
             response, token_usage = generate_conversation(
                 self.bedrock_client,
                 self.model_id,
@@ -119,10 +122,11 @@ class BedrockUser(User):
                 self.service_tier
             )
             
+            response_time = (time.time() - start_time) * 1000  # milliseconds
+            
             logger.debug(f"Response: {response['output']['message']['content'][0]['text'][:100]}...")
             
             # Write token data to file immediately after each successful request
-            # (only successful requests reach here since exceptions bubble up)
             token_file = Path('test_results') / 'token_data.jsonl'
             token_file.parent.mkdir(exist_ok=True)
             
@@ -139,3 +143,28 @@ class BedrockUser(User):
             # Append to JSONL file (one JSON object per line)
             with open(token_file, 'a') as f:
                 f.write(json.dumps(token_record) + '\n')
+            
+            # Fire success event
+            self.environment.events.request.fire(
+                request_type="Converse",
+                name=request_name,
+                response_time=response_time,
+                response_length=0,
+                exception=None,
+                context={}
+            )
+                
+        except (ClientError, Exception) as e:
+            exception = e
+            response_time = (time.time() - start_time) * 1000
+            logger.error(f"Request failed: {e}")
+            
+            # Fire failure event with response_time=None to exclude from metrics
+            self.environment.events.request.fire(
+                request_type="Converse",
+                name=request_name,
+                response_time=None,  # This excludes the failed request from latency stats
+                response_length=0,
+                exception=exception,
+                context={}
+            )

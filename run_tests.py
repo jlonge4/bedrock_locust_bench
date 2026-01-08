@@ -231,7 +231,7 @@ def generate_comparison_charts(results_df, region_prefixes):
             if not data.empty:
                 # Group by service tier and users
                 pivot = data.pivot_table(
-                    values='success_avg_response_time',
+                    values='avg_response_time',
                     index='service_tier',
                     columns='users',
                     aggfunc='mean'
@@ -239,7 +239,7 @@ def generate_comparison_charts(results_df, region_prefixes):
                 
                 pivot.plot(kind='bar', ax=ax, rot=0)
                 ax.set_title(f'{region.upper()} - {prompt_size.capitalize()}')
-                ax.set_ylabel('Avg Response Time (ms) - Success Only')
+                ax.set_ylabel('Avg Response Time (ms)')
                 ax.set_xlabel('Service Tier')
                 ax.legend(title='Users', loc='upper left')
                 ax.grid(axis='y', alpha=0.3)
@@ -260,18 +260,18 @@ def generate_comparison_charts(results_df, region_prefixes):
         if not data.empty:
             # Group by service tier and region
             grouped = data.groupby(['service_tier', 'region_prefix']).agg({
-                'success_p50': 'mean',
-                'success_p95': 'mean'
+                'p50': 'mean',
+                'p95': 'mean'
             }).reset_index()
             
             x = range(len(grouped))
             width = 0.35
             
-            bars1 = ax.bar([i - width/2 for i in x], grouped['success_p50'], width, label='P50', alpha=0.8)
-            bars2 = ax.bar([i + width/2 for i in x], grouped['success_p95'], width, label='P95', alpha=0.8)
+            bars1 = ax.bar([i - width/2 for i in x], grouped['p50'], width, label='P50', alpha=0.8)
+            bars2 = ax.bar([i + width/2 for i in x], grouped['p95'], width, label='P95', alpha=0.8)
             
             ax.set_xlabel('Configuration')
-            ax.set_ylabel('Response Time (ms) - Success Only')
+            ax.set_ylabel('Response Time (ms)')
             ax.set_title(f'{prompt_size.capitalize()} Prompts')
             ax.set_xticks(x)
             ax.set_xticklabels([f"{row['service_tier']}\n({row['region_prefix']})" 
@@ -288,7 +288,7 @@ def generate_comparison_charts(results_df, region_prefixes):
     
     # Group by prompt size and service tier
     pivot = results_df.pivot_table(
-        values=['success_avg_response_time', 'success_p50', 'success_p95'],
+        values=['avg_response_time', 'p50', 'p95'],
         index='prompt_size',
         columns='service_tier',
         aggfunc='mean'
@@ -297,7 +297,7 @@ def generate_comparison_charts(results_df, region_prefixes):
     x = range(len(PROMPT_SIZES))
     width = 0.25
     
-    for idx, metric in enumerate(['success_avg_response_time', 'success_p50', 'success_p95']):
+    for idx, metric in enumerate(['avg_response_time', 'p50', 'p95']):
         if metric in pivot.columns.levels[0]:
             offset = (idx - 1) * width
             for jdx, tier in enumerate(SERVICE_TIERS):
@@ -352,7 +352,7 @@ def generate_comparison_charts(results_df, region_prefixes):
         # Create pivot table for heatmap
         data = results_df[results_df['region_prefix'] == region]
         pivot = data.pivot_table(
-            values='success_avg_response_time',
+            values='avg_response_time',
             index='service_tier',
             columns='prompt_size',
             aggfunc='mean'
@@ -473,23 +473,23 @@ def main():
         
         # Print summary statistics
         print("\n" + "="*80)
-        print("SUMMARY STATISTICS (SUCCESS REQUESTS ONLY)")
+        print("SUMMARY STATISTICS")
         print("="*80)
         print("\nAverage Response Time by Service Tier:")
-        print(results_df.groupby('service_tier')['success_avg_response_time'].mean().to_string())
+        print(results_df.groupby('service_tier')['avg_response_time'].mean().to_string())
         
         print("\nAverage Response Time by Prompt Size:")
-        print(results_df.groupby('prompt_size')['success_avg_response_time'].mean().to_string())
+        print(results_df.groupby('prompt_size')['avg_response_time'].mean().to_string())
         
         print("\nAverage Response Time by Region:")
-        print(results_df.groupby('region_prefix')['success_avg_response_time'].mean().to_string())
+        print(results_df.groupby('region_prefix')['avg_response_time'].mean().to_string())
         
         print("\nP95 Latency by Service Tier:")
-        print(results_df.groupby('service_tier')['success_p95'].mean().to_string())
+        print(results_df.groupby('service_tier')['p95'].mean().to_string())
         
-        print("\nSuccess Rate by Configuration:")
-        results_df['success_rate'] = (results_df['success_count'] / results_df['total_requests'] * 100).round(2)
-        print(results_df.groupby(['region_prefix', 'service_tier', 'prompt_size'])['success_rate'].mean().to_string())
+        print("\nFailure Rate by Configuration:")
+        results_df['failure_rate'] = (results_df['failure_count'] / results_df['total_requests'] * 100).round(2)
+        print(results_df.groupby(['region_prefix', 'service_tier', 'prompt_size'])['failure_rate'].mean().to_string())
         
         print("\nAverage Input Tokens by Prompt Size:")
         print(results_df.groupby('prompt_size')['avg_input_tokens'].mean().to_string())
