@@ -1,11 +1,10 @@
-from locust import User, task, between, events
+from locust import User, task, between
 import logging
 import boto3
 import os
 import json
 import time
 from pathlib import Path
-
 from botocore.client import Config
 from botocore.exceptions import ClientError
 
@@ -13,158 +12,96 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
-def generate_conversation(bedrock_client, model_id, messages, service_tier=None):
-    """
-    Sends messages to a model using the Converse API.
-    
-    Args:
-        bedrock_client: The Boto3 Bedrock runtime client.
-        model_id (str): The model ID to use.
-        messages (list): The messages to send to the model.
-        service_tier (str): The service tier to use ('priority', 'default', 'flex', or None)
-
-    Returns:
-        response (dict): The conversation that the model generated.
-    """
-
-    logger.info("Generating message with model %s", model_id)
-
-    # Inference parameters to use.
-    temperature = 0.5
-    max_tokens = 4096
-
-    # Base inference parameters to use.
-    inference_config = {
-        "temperature": temperature,
-        "maxTokens": max_tokens,
-        "topP": 1,
-    }
-    
-    # Prepare converse parameters
-    converse_params = {
-        "modelId": model_id,
-        "messages": messages,
-        "inferenceConfig": inference_config,
-    }
-    
-    # Add service tier if specified
-    if service_tier:
-        converse_params["serviceTier"] = {"type": service_tier}
-    
-    # Send the message.
-    response = bedrock_client.converse(**converse_params)
-
-    # Log token usage.
-    token_usage = response['usage']
-    logger.info("Input tokens: %s", token_usage['inputTokens'])
-    logger.info("Output tokens: %s", token_usage['outputTokens'])
-    logger.info("Total tokens: %s", token_usage['totalTokens'])
-    logger.info("Stop reason: %s", response['stopReason'])
-
-    return response, token_usage
-
-
 class BedrockUser(User):
     wait_time = between(1, 2)
     
     def on_start(self):
-        """Called when a simulated user starts running."""
-        # Get configuration from environment variables
-        self.base_model_id = os.getenv('BASE_MODEL_ID', 'anthropic.claude-3-5-sonnet-20241022-v2:0')
-        self.region_prefix = os.getenv('REGION_PREFIX', 'us')  # 'us' or 'global'
-        self.service_tier = os.getenv('SERVICE_TIER')  # 'priority', 'default', 'flex', or None
-        self.prompt_size = os.getenv('PROMPT_SIZE', 'medium')  # 'small', 'medium', or 'large'
+        """Initialize Bedrock client and load configuration."""
+        # Configuration from environment
+        base_model_id = os.getenv('BASE_MODEL_ID', 'amazon.nova-2-lite-v1:0')
+        region_prefix = os.getenv('REGION_PREFIX', 'us')
+        self.service_tier = os.getenv('SERVICE_TIER')
+        self.prompt_size = os.getenv('PROMPT_SIZE', 'small')
         
-        # Construct full model ID with region prefix
-        self.model_id = f"{self.region_prefix}.{self.base_model_id}"
+        # Build full model ID
+        self.model_id = f"{region_prefix}.{base_model_id}"
         
-        # Load prompts from file
-        prompts_file = os.getenv('PROMPTS_FILE', 'prompts.json')
-        with open(prompts_file, 'r') as f:
+        # Load prompt
+        with open(os.getenv('PROMPTS_FILE', 'prompts.json'), 'r') as f:
             prompts = json.load(f)
+        prompt_text = prompts[self.prompt_size]['text']
         
-        # Get the prompt text for the specified size
-        self.prompt_text = prompts[self.prompt_size]['text']
+        # Prepare request payload
+        self.messages = [{"role": "user", "content": [{"text": prompt_text}]}]
+        self.inference_config = {"temperature": 0.5, "maxTokens": 4096, "topP": 1}
         
-        # Prepare messages
-        self.messages = [
-            {
-                "role": "user",
-                "content": [{"text": self.prompt_text}],
-            }
-        ]
+        # Create Bedrock client
+        config = Config(connect_timeout=840, read_timeout=840)
+        self.bedrock = boto3.client('bedrock-runtime', config=config)
         
-        # Configure Bedrock client with extended timeouts
-        custom_config = Config(connect_timeout=840, read_timeout=840)
-        self.bedrock_client = boto3.client(
-            service_name='bedrock-runtime',
-            config=custom_config
-        )
+        # Request name for metrics
+        self.request_name = f"[{region_prefix}][{self.service_tier or 'none'}][{self.prompt_size}]"
         
-        logger.info(f"Initialized user with model: {self.model_id}, "
-                   f"service tier: {self.service_tier}, "
-                   f"prompt size: {self.prompt_size}")
+        logger.info(f"Initialized: {self.model_id}, tier={self.service_tier}, prompt={self.prompt_size}")
     
     @task
     def converse_request(self):
-        """Execute a Converse API request."""
-        # Create a descriptive name for the request
-        request_name = f"[{self.region_prefix}][{self.service_tier or 'none'}][{self.prompt_size}]"
-        
+        """Execute Bedrock Converse API request."""
         start_time = time.time()
-        exception = None
         
         try:
-            response, token_usage = generate_conversation(
-                self.bedrock_client,
-                self.model_id,
-                self.messages,
-                self.service_tier
-            )
-            
-            response_time = (time.time() - start_time) * 1000  # milliseconds
-            
-            logger.debug(f"Response: {response['output']['message']['content'][0]['text'][:100]}...")
-            
-            # Write token data to file immediately after each successful request
-            token_file = Path('test_results') / 'token_data.jsonl'
-            token_file.parent.mkdir(exist_ok=True)
-            
-            token_record = {
-                'timestamp': time.time(),
-                'region_prefix': self.region_prefix,
-                'service_tier': self.service_tier or 'none',
-                'prompt_size': self.prompt_size,
-                'input_tokens': token_usage['inputTokens'],
-                'output_tokens': token_usage['outputTokens'],
-                'total_tokens': token_usage['totalTokens']
+            # Build request parameters
+            params = {
+                "modelId": self.model_id,
+                "messages": self.messages,
+                "inferenceConfig": self.inference_config
             }
+            if self.service_tier:
+                params["serviceTier"] = {"type": self.service_tier}
             
-            # Append to JSONL file (one JSON object per line)
+            # Call Bedrock API
+            response = self.bedrock.converse(**params)
+            response_time = (time.time() - start_time) * 1000
+            
+            # Extract token usage
+            tokens = response['usage']
+            logger.info(f"Tokens - Input: {tokens['inputTokens']}, Output: {tokens['outputTokens']}")
+            
+            # Save token data
+            token_file = Path('test_results/token_data.jsonl')
+            token_file.parent.mkdir(exist_ok=True)
             with open(token_file, 'a') as f:
-                f.write(json.dumps(token_record) + '\n')
+                f.write(json.dumps({
+                    'timestamp': time.time(),
+                    'region_prefix': os.getenv('REGION_PREFIX', 'us'),
+                    'service_tier': self.service_tier or 'none',
+                    'prompt_size': self.prompt_size,
+                    'response_time_ms': response_time,
+                    'input_tokens': tokens['inputTokens'],
+                    'output_tokens': tokens['outputTokens'],
+                    'total_tokens': tokens['totalTokens']
+                }) + '\n')
             
-            # Fire success event
+            # Record success
             self.environment.events.request.fire(
                 request_type="Converse",
-                name=request_name,
+                name=self.request_name,
                 response_time=response_time,
                 response_length=0,
                 exception=None,
                 context={}
             )
                 
-        except (ClientError, Exception) as e:
-            exception = e
+        except Exception as e:
             response_time = (time.time() - start_time) * 1000
             logger.error(f"Request failed: {e}")
             
-            # Fire failure event with response_time=None to exclude from metrics
+            # Record failure (response_time=None excludes from latency metrics)
             self.environment.events.request.fire(
                 request_type="Converse",
-                name=request_name,
-                response_time=None,  # This excludes the failed request from latency stats
+                name=self.request_name,
+                response_time=None,
                 response_length=0,
-                exception=exception,
+                exception=e,
                 context={}
             )
