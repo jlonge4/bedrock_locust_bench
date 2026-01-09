@@ -104,6 +104,7 @@ The `run_tests.py` script accepts the following arguments:
 - `--user-counts` - Comma-separated concurrent user counts (default: `30,60,90`)
 - `--test-duration` - Duration for each test: `30s`, `1m`, `5m`, etc. (default: `1m`)
 - `--spawn-rate` - Users spawned per second (default: `10`)
+- `--max-tokens` - Maximum output tokens for model responses (default: `4096`)
 - `--include-failures` - Include failed requests in latency metrics (default: excluded)
 - `--yes`, `-y` - Skip confirmation prompt
 
@@ -120,6 +121,7 @@ export BASE_MODEL_ID=amazon.nova-2-lite-v1:0
 export RESULTS_DIR=test_results/baseline
 export REGION_PREFIXES=us,global
 export USER_COUNTS=30,60,90
+export MAX_TOKENS=2048
 export INCLUDE_FAILURES=true
 python run_tests.py
 ```
@@ -132,6 +134,7 @@ Environment variables for `locustfile.py` (when running Locust directly):
 - `PROMPT_SIZE` - Either `small`, `medium`, or `large`
 - `PROMPTS_FILE` - Path to prompts JSON file (default: `prompts.json`)
 - `RESULTS_DIR` - Directory for test results (default: `test_results`)
+- `MAX_TOKENS` - Maximum output tokens (default: `4096`)
 - `INCLUDE_FAILURES` - Include failed requests in latency metrics (default: `false`)
 
 ## Test Permutations

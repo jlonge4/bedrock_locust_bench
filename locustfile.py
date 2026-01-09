@@ -37,7 +37,8 @@ class BedrockUser(User):
         
         # Prepare request payload
         self.messages = [{"role": "user", "content": [{"text": prompt_text}]}]
-        self.inference_config = {"temperature": 0.5, "maxTokens": 4096, "topP": 1}
+        max_tokens = int(os.getenv('MAX_TOKENS', '4096'))
+        self.inference_config = {"temperature": 0.5, "maxTokens": max_tokens, "topP": 1}
         
         # Create Bedrock client
         config = Config(connect_timeout=840, read_timeout=840)

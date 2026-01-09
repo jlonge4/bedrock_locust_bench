@@ -94,6 +94,13 @@ Examples:
     )
     
     parser.add_argument(
+        '--max-tokens',
+        type=int,
+        default=int(os.getenv('MAX_TOKENS', '4096')),
+        help='Maximum output tokens for model responses (default: 4096)'
+    )
+    
+    parser.add_argument(
         '--include-failures',
         action='store_true',
         default=os.getenv('INCLUDE_FAILURES', 'false').lower() == 'true',
@@ -115,7 +122,7 @@ def setup_directories(results_dir):
     (results_dir / 'charts').mkdir(exist_ok=True)
 
 
-def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, spawn_rate, test_id, results_dir, test_duration):
+def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, spawn_rate, test_id, results_dir, test_duration, max_tokens):
     """
     Run a single Locust test with the specified configuration.
     
@@ -136,7 +143,8 @@ def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, s
     env['REGION_PREFIX'] = region_prefix
     env['SERVICE_TIER'] = service_tier
     env['PROMPT_SIZE'] = prompt_size
-    env['RESULTS_DIR'] = str(results_dir)  # Pass results dir to locustfile
+    env['RESULTS_DIR'] = str(results_dir)
+    env['MAX_TOKENS'] = str(max_tokens)
     
     # Output files
     csv_file = results_dir / f"test_{test_id}_stats.csv"
@@ -492,6 +500,7 @@ def main():
     print(f"  User Counts: {user_counts}")
     print(f"  Test Duration: {args.test_duration}")
     print(f"  Spawn Rate: {args.spawn_rate} users/sec")
+    print(f"  Max Output Tokens: {args.max_tokens}")
     print(f"  Results Directory: {results_dir}")
     print(f"  Include Failures: {args.include_failures}")
     print()
@@ -499,8 +508,9 @@ def main():
     # Setup directories
     setup_directories(results_dir)
     
-    # Set environment variable for locustfile
+    # Set environment variables for locustfile
     os.environ['INCLUDE_FAILURES'] = str(args.include_failures).lower()
+    os.environ['MAX_TOKENS'] = str(args.max_tokens)
     
     # Generate all permutations
     permutations = list(product(region_prefixes, service_tiers, prompt_sizes, user_counts))
@@ -534,7 +544,8 @@ def main():
             spawn_rate=args.spawn_rate,
             test_id=test_id,
             results_dir=results_dir,
-            test_duration=args.test_duration
+            test_duration=args.test_duration,
+            max_tokens=args.max_tokens
         )
         
         if result:
