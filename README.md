@@ -5,7 +5,7 @@ This project provides a comprehensive load testing framework for AWS Bedrock Con
 ## Overview
 
 The testing framework evaluates Bedrock model performance across multiple dimensions:
-- **Region Prefixes**: `us.` and `global.`
+- **Region Prefixes**: `us.` (see [AWS documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/service-tiers-inference.html) for region and model compatibility)
 - **Service Tiers**: `default`, `priority`, and `flex`
 - **Prompt Sizes**: Small (~5 words), Medium (~40 words), and Large (~150 words)
 - **User Loads**: Configurable concurrent users (default: 30, 60, 90)
@@ -98,7 +98,7 @@ The `run_tests.py` script accepts the following arguments:
 
 - `--model-id` - Base Bedrock model ID without region prefix (default: `amazon.nova-premier-v1:0`)
 - `--results-dir` - Directory to store test results (default: `test_results`)
-- `--region-prefixes` - Comma-separated region prefixes: `us`, `global` (default: `us`)
+- `--region-prefixes` - Comma-separated region prefixes: `us` (default: `us`). See [AWS documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/service-tiers-inference.html) for region and model compatibility
 - `--service-tiers` - Comma-separated service tiers: `default`, `priority`, `flex` (default: all)
 - `--prompt-sizes` - Comma-separated prompt sizes: `small`, `medium`, `large` (default: all)
 - `--user-counts` - Comma-separated concurrent user counts (default: `30,60,90`)
@@ -119,7 +119,7 @@ You can also use environment variables instead of command-line arguments:
 ```bash
 export BASE_MODEL_ID=amazon.nova-2-lite-v1:0
 export RESULTS_DIR=test_results/baseline
-export REGION_PREFIXES=us,global
+export REGION_PREFIXES=us
 export USER_COUNTS=30,60,90
 export MAX_TOKENS=2048
 export INCLUDE_FAILURES=true
@@ -129,7 +129,7 @@ python run_tests.py
 Environment variables for `locustfile.py` (when running Locust directly):
 
 - `BASE_MODEL_ID` - Base model ID without region prefix
-- `REGION_PREFIX` - Either `us` or `global`
+- `REGION_PREFIX` - Region prefix (e.g., `us`). See [AWS documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/service-tiers-inference.html) for region and model compatibility
 - `SERVICE_TIER` - Either `default`, `priority`, or `flex`
 - `PROMPT_SIZE` - Either `small`, `medium`, or `large`
 - `PROMPTS_FILE` - Path to prompts JSON file (default: `prompts.json`)
@@ -140,9 +140,11 @@ Environment variables for `locustfile.py` (when running Locust directly):
 ## Test Permutations
 
 By default, the framework tests:
-- 2 region prefixes × 3 service tiers × 3 prompt sizes × 3 user counts = **54 test permutations**
+- 1 region prefix × 3 service tiers × 3 prompt sizes × 3 user counts = **27 test permutations**
 
-Each test runs for 5 minutes, so the full suite takes approximately **4.5 hours** to complete.
+Each test runs for 1 minute, so the full suite takes approximately **27 minutes** to complete.
+
+**Note**: Different models are available in different regions with different service tiers. Refer to the [AWS Bedrock service tiers documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/service-tiers-inference.html) for region and model compatibility details.
 
 ## Output
 
