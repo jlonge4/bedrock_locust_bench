@@ -11,6 +11,10 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+# Configuration from environment
+RESULTS_DIR = Path(os.getenv('RESULTS_DIR', 'test_results'))
+INCLUDE_FAILURES = os.getenv('INCLUDE_FAILURES', 'false').lower() == 'true'
+
 
 class BedrockUser(User):
     wait_time = between(1, 2)
@@ -68,7 +72,7 @@ class BedrockUser(User):
             logger.info(f"Tokens - Input: {tokens['inputTokens']}, Output: {tokens['outputTokens']}")
             
             # Save token data
-            token_file = Path('test_results/token_data.jsonl')
+            token_file = RESULTS_DIR / 'token_data.jsonl'
             token_file.parent.mkdir(exist_ok=True)
             with open(token_file, 'a') as f:
                 f.write(json.dumps({
@@ -96,11 +100,11 @@ class BedrockUser(User):
             response_time = (time.time() - start_time) * 1000
             logger.error(f"Request failed: {e}")
             
-            # Record failure (response_time=None excludes from latency metrics)
+            # Record failure (response_time=None excludes from latency metrics unless INCLUDE_FAILURES=true)
             self.environment.events.request.fire(
                 request_type="Converse",
                 name=self.request_name,
-                response_time=None,
+                response_time=response_time if INCLUDE_FAILURES else None,
                 response_length=0,
                 exception=e,
                 context={}

@@ -4,6 +4,7 @@ Orchestration script to run Locust tests across multiple permutations
 and generate comparison charts for latency metrics.
 """
 
+import argparse
 import os
 import subprocess
 import json
@@ -16,27 +17,105 @@ matplotlib.use('Agg')  # Use non-interactive backend
 import pandas as pd
 from itertools import product
 
-# Configuration
-SERVICE_TIERS = ['default', 'priority', 'flex']
-PROMPT_SIZES = ['small', 'medium', 'large']
-USER_COUNTS = [30, 60, 90]  # Concurrent users
 
-# Test duration and spawn rate
-TEST_DURATION = '1m'  # 2 minutes per test
-SPAWN_RATE = 10  # Users spawned per second
+def parse_arguments():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description='Run Bedrock Converse API load tests with Locust across multiple configurations.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run with defaults (us region, all tiers, all prompts, 30/60/90 users)
+  python run_tests.py
 
-# Results directory
-RESULTS_DIR = Path('test_results')
-CHARTS_DIR = RESULTS_DIR / 'charts'
+  # Specify custom model and results directory
+  python run_tests.py --model-id amazon.nova-2-lite-v1:0 --results-dir test_results/nova_run
+
+  # Test only specific configurations
+  python run_tests.py --region-prefixes us --service-tiers priority,flex --user-counts 30,60
+
+  # Include failures in latency metrics
+  python run_tests.py --include-failures
+
+  # Quick test with shorter duration
+  python run_tests.py --test-duration 30s --user-counts 10
+        """
+    )
+    
+    parser.add_argument(
+        '--model-id', '--base-model-id',
+        dest='model_id',
+        default=os.getenv('BASE_MODEL_ID', 'amazon.nova-premier-v1:0'),
+        help='Base Bedrock model ID without region prefix (default: amazon.nova-premier-v1:0)'
+    )
+    
+    parser.add_argument(
+        '--results-dir',
+        type=Path,
+        default=Path(os.getenv('RESULTS_DIR', 'test_results')),
+        help='Directory to store test results (default: test_results)'
+    )
+    
+    parser.add_argument(
+        '--region-prefixes',
+        default=os.getenv('REGION_PREFIXES', 'us'),
+        help='Comma-separated region prefixes to test (default: us). Options: us, global'
+    )
+    
+    parser.add_argument(
+        '--service-tiers',
+        default='default,priority,flex',
+        help='Comma-separated service tiers to test (default: default,priority,flex)'
+    )
+    
+    parser.add_argument(
+        '--prompt-sizes',
+        default='small,medium,large',
+        help='Comma-separated prompt sizes to test (default: small,medium,large)'
+    )
+    
+    parser.add_argument(
+        '--user-counts',
+        default=os.getenv('USER_COUNTS', '30,60,90'),
+        help='Comma-separated user counts to test (default: 30,60,90)'
+    )
+    
+    parser.add_argument(
+        '--test-duration',
+        default='1m',
+        help='Duration for each test run (default: 1m). Examples: 30s, 2m, 5m'
+    )
+    
+    parser.add_argument(
+        '--spawn-rate',
+        type=int,
+        default=10,
+        help='Users spawned per second (default: 10)'
+    )
+    
+    parser.add_argument(
+        '--include-failures',
+        action='store_true',
+        default=os.getenv('INCLUDE_FAILURES', 'false').lower() == 'true',
+        help='Include failed requests in latency metrics (default: false)'
+    )
+    
+    parser.add_argument(
+        '--yes', '-y',
+        action='store_true',
+        help='Skip confirmation prompt and run tests immediately'
+    )
+    
+    return parser.parse_args()
 
 
-def setup_directories():
+def setup_directories(results_dir):
     """Create necessary directories for results."""
-    RESULTS_DIR.mkdir(exist_ok=True)
-    CHARTS_DIR.mkdir(exist_ok=True)
+    results_dir.mkdir(exist_ok=True)
+    (results_dir / 'charts').mkdir(exist_ok=True)
 
 
-def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, spawn_rate, test_id):
+def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, spawn_rate, test_id, results_dir, test_duration):
     """
     Run a single Locust test with the specified configuration.
     
@@ -57,10 +136,11 @@ def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, s
     env['REGION_PREFIX'] = region_prefix
     env['SERVICE_TIER'] = service_tier
     env['PROMPT_SIZE'] = prompt_size
+    env['RESULTS_DIR'] = str(results_dir)  # Pass results dir to locustfile
     
     # Output files
-    csv_file = RESULTS_DIR / f"test_{test_id}_stats.csv"
-    html_file = RESULTS_DIR / f"test_{test_id}_report.html"
+    csv_file = results_dir / f"test_{test_id}_stats.csv"
+    html_file = results_dir / f"test_{test_id}_report.html"
     
     # Construct Locust command
     cmd = [
@@ -69,8 +149,8 @@ def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, s
         '--headless',
         '--users', str(users),
         '--spawn-rate', str(spawn_rate),
-        '--run-time', TEST_DURATION,
-        '--csv', str(RESULTS_DIR / f"test_{test_id}"),
+        '--run-time', test_duration,
+        '--csv', str(results_dir / f"test_{test_id}"),
         '--html', str(html_file),
         '--only-summary',
     ]
@@ -88,7 +168,7 @@ def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, s
         print(result.stdout)
         
         # Parse results from CSV
-        stats_file = RESULTS_DIR / f"test_{test_id}_stats.csv"
+        stats_file = results_dir / f"test_{test_id}_stats.csv"
         if stats_file.exists():
             df = pd.read_csv(stats_file)
             # Filter for the actual request type (not aggregated stats)
@@ -113,7 +193,7 @@ def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, s
                 }
                 
                 # Read token statistics from JSONL file for this specific test (only successful requests)
-                token_file = RESULTS_DIR / 'token_data.jsonl'
+                token_file = results_dir / 'token_data.jsonl'
                 if token_file.exists():
                     try:
                         input_tokens = []
@@ -207,7 +287,7 @@ def run_locust_test(model_id, region_prefix, service_tier, prompt_size, users, s
         return None
 
 
-def generate_comparison_charts(results_df, region_prefixes):
+def generate_comparison_charts(results_df, region_prefixes, service_tiers, prompt_sizes, charts_dir):
     """Generate matplotlib charts comparing latency metrics across permutations."""
     
     print("\nGenerating comparison charts...")
@@ -219,7 +299,7 @@ def generate_comparison_charts(results_df, region_prefixes):
     fig.suptitle('Average Response Time by Configuration', fontsize=16, fontweight='bold')
     
     for idx, region in enumerate(region_prefixes):
-        for jdx, prompt_size in enumerate(PROMPT_SIZES):
+        for jdx, prompt_size in enumerate(prompt_sizes):
             ax = axes[idx][jdx]
             
             # Filter data
@@ -245,14 +325,14 @@ def generate_comparison_charts(results_df, region_prefixes):
                 ax.grid(axis='y', alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(CHARTS_DIR / 'avg_latency_by_config.png', dpi=300, bbox_inches='tight')
-    print(f"  ✓ Saved: {CHARTS_DIR / 'avg_latency_by_config.png'}")
+    plt.savefig(charts_dir / 'avg_latency_by_config.png', dpi=300, bbox_inches='tight')
+    print(f"  ✓ Saved: {charts_dir / 'avg_latency_by_config.png'}")
     
     # 2. Chart: P50 and P95 Comparison across Service Tiers
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     fig.suptitle('P50 vs P95 Latency by Prompt Size', fontsize=16, fontweight='bold')
     
-    for idx, prompt_size in enumerate(PROMPT_SIZES):
+    for idx, prompt_size in enumerate(prompt_sizes):
         ax = axes[idx]
         
         data = results_df[results_df['prompt_size'] == prompt_size]
@@ -280,8 +360,8 @@ def generate_comparison_charts(results_df, region_prefixes):
             ax.grid(axis='y', alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(CHARTS_DIR / 'p50_p95_comparison.png', dpi=300, bbox_inches='tight')
-    print(f"  ✓ Saved: {CHARTS_DIR / 'p50_p95_comparison.png'}")
+    plt.savefig(charts_dir / 'p50_p95_comparison.png', dpi=300, bbox_inches='tight')
+    print(f"  ✓ Saved: {charts_dir / 'p50_p95_comparison.png'}")
     
     # 3. Chart: Latency by Prompt Size
     fig, ax = plt.subplots(figsize=(12, 8))
@@ -294,15 +374,15 @@ def generate_comparison_charts(results_df, region_prefixes):
         aggfunc='mean'
     )
     
-    x = range(len(PROMPT_SIZES))
+    x = range(len(prompt_sizes))
     width = 0.25
     
     for idx, metric in enumerate(['avg_response_time', 'p50', 'p95']):
         if metric in pivot.columns.levels[0]:
             offset = (idx - 1) * width
-            for jdx, tier in enumerate(SERVICE_TIERS):
+            for jdx, tier in enumerate(service_tiers):
                 if tier in pivot[metric].columns:
-                    values = [pivot[metric][tier].get(size, 0) for size in PROMPT_SIZES]
+                    values = [pivot[metric][tier].get(size, 0) for size in prompt_sizes]
                     ax.bar([i + offset + jdx*0.08 for i in x], values, 
                           width=0.08, label=f'{metric}-{tier}', alpha=0.8)
     
@@ -310,13 +390,13 @@ def generate_comparison_charts(results_df, region_prefixes):
     ax.set_ylabel('Response Time (ms)')
     ax.set_title('Latency Metrics by Prompt Size and Service Tier')
     ax.set_xticks(x)
-    ax.set_xticklabels([s.capitalize() for s in PROMPT_SIZES])
+    ax.set_xticklabels([s.capitalize() for s in prompt_sizes])
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     ax.grid(axis='y', alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(CHARTS_DIR / 'latency_by_prompt_size.png', dpi=300, bbox_inches='tight')
-    print(f"  ✓ Saved: {CHARTS_DIR / 'latency_by_prompt_size.png'}")
+    plt.savefig(charts_dir / 'latency_by_prompt_size.png', dpi=300, bbox_inches='tight')
+    print(f"  ✓ Saved: {charts_dir / 'latency_by_prompt_size.png'}")
     
     # 4. Chart: Throughput (Requests/sec) Comparison
     fig, ax = plt.subplots(figsize=(14, 8))
@@ -336,8 +416,8 @@ def generate_comparison_charts(results_df, region_prefixes):
     ax.grid(axis='y', alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(CHARTS_DIR / 'throughput_comparison.png', dpi=300, bbox_inches='tight')
-    print(f"  ✓ Saved: {CHARTS_DIR / 'throughput_comparison.png'}")
+    plt.savefig(charts_dir / 'throughput_comparison.png', dpi=300, bbox_inches='tight')
+    print(f"  ✓ Saved: {charts_dir / 'throughput_comparison.png'}")
     
     # 5. Heatmap: Average Latency across all dimensions
     fig, axes = plt.subplots(len(region_prefixes), 1, figsize=(14, 5 * len(region_prefixes)))
@@ -381,57 +461,60 @@ def generate_comparison_charts(results_df, region_prefixes):
         ax.set_ylabel('Service Tier')
     
     plt.tight_layout()
-    plt.savefig(CHARTS_DIR / 'latency_heatmap.png', dpi=300, bbox_inches='tight')
-    print(f"  ✓ Saved: {CHARTS_DIR / 'latency_heatmap.png'}")
+    plt.savefig(charts_dir / 'latency_heatmap.png', dpi=300, bbox_inches='tight')
+    print(f"  ✓ Saved: {charts_dir / 'latency_heatmap.png'}")
     
     print("\nAll charts generated successfully!")
 
 
 def main():
     """Main orchestration function."""
+    args = parse_arguments()
+    
+    # Parse comma-separated lists
+    region_prefixes = [x.strip() for x in args.region_prefixes.split(',')]
+    service_tiers = [x.strip() for x in args.service_tiers.split(',')]
+    prompt_sizes = [x.strip() for x in args.prompt_sizes.split(',')]
+    user_counts = [int(x.strip()) for x in args.user_counts.split(',')]
+    
+    results_dir = args.results_dir
+    charts_dir = results_dir / 'charts'
+    
     print("="*80)
     print("BEDROCK LOAD TEST ORCHESTRATION")
     print("="*80)
     
-    # Get model ID from environment or use default
-    base_model_id = os.getenv('BASE_MODEL_ID', 'amazon.nova-premier-v1:0')
-    
-    # Optional: Configure region prefixes
-    region_prefixes_env = os.getenv('REGION_PREFIXES', 'us')
-    region_prefixes = [x.strip() for x in region_prefixes_env.split(',')]
-    
-    # Optional: Configure user counts
-    user_counts_env = os.getenv('USER_COUNTS')
-    if user_counts_env:
-        user_counts = [int(x.strip()) for x in user_counts_env.split(',')]
-    else:
-        user_counts = USER_COUNTS
-    
     print(f"\nConfiguration:")
-    print(f"  Base Model ID: {base_model_id}")
+    print(f"  Base Model ID: {args.model_id}")
     print(f"  Region Prefixes: {region_prefixes}")
-    print(f"  Service Tiers: {SERVICE_TIERS}")
-    print(f"  Prompt Sizes: {PROMPT_SIZES}")
+    print(f"  Service Tiers: {service_tiers}")
+    print(f"  Prompt Sizes: {prompt_sizes}")
     print(f"  User Counts: {user_counts}")
-    print(f"  Test Duration: {TEST_DURATION}")
-    print(f"  Spawn Rate: {SPAWN_RATE} users/sec")
+    print(f"  Test Duration: {args.test_duration}")
+    print(f"  Spawn Rate: {args.spawn_rate} users/sec")
+    print(f"  Results Directory: {results_dir}")
+    print(f"  Include Failures: {args.include_failures}")
     print()
     
     # Setup directories
-    setup_directories()
+    setup_directories(results_dir)
+    
+    # Set environment variable for locustfile
+    os.environ['INCLUDE_FAILURES'] = str(args.include_failures).lower()
     
     # Generate all permutations
-    permutations = list(product(region_prefixes, SERVICE_TIERS, PROMPT_SIZES, user_counts))
+    permutations = list(product(region_prefixes, service_tiers, prompt_sizes, user_counts))
     total_tests = len(permutations)
     
     print(f"Total test permutations: {total_tests}")
-    print(f"Estimated total time: ~{total_tests * int(TEST_DURATION[:-1])} minutes\n")
+    print(f"Estimated total time: ~{total_tests * int(args.test_duration[:-1])} minutes\n")
     
     # Confirm before proceeding
-    response = input("Proceed with tests? (yes/no): ")
-    if response.lower() not in ['yes', 'y']:
-        print("Test execution cancelled.")
-        return
+    if not args.yes:
+        response = input("Proceed with tests? (yes/no): ")
+        if response.lower() not in ['yes', 'y']:
+            print("Test execution cancelled.")
+            return
     
     # Run all tests
     results = []
@@ -443,13 +526,15 @@ def main():
         print(f"\nProgress: {test_num}/{total_tests}")
         
         result = run_locust_test(
-            model_id=base_model_id,
+            model_id=args.model_id,
             region_prefix=region,
             service_tier=tier,
             prompt_size=prompt,
             users=users,
-            spawn_rate=SPAWN_RATE,
-            test_id=test_id
+            spawn_rate=args.spawn_rate,
+            test_id=test_id,
+            results_dir=results_dir,
+            test_duration=args.test_duration
         )
         
         if result:
@@ -467,7 +552,7 @@ def main():
     # Save consolidated results
     if results:
         results_df = pd.DataFrame(results)
-        results_file = RESULTS_DIR / f'consolidated_results_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+        results_file = results_dir / f'consolidated_results_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
         results_df.to_csv(results_file, index=False)
         print(f"Consolidated results saved to: {results_file}")
         
@@ -498,11 +583,11 @@ def main():
         print(results_df.groupby('service_tier')['avg_output_tokens'].mean().to_string())
         
         # Generate charts
-        generate_comparison_charts(results_df, region_prefixes)
+        generate_comparison_charts(results_df, region_prefixes, service_tiers, prompt_sizes, charts_dir)
         
         print(f"\n{'='*80}")
-        print(f"Results saved to: {RESULTS_DIR}")
-        print(f"Charts saved to: {CHARTS_DIR}")
+        print(f"Results saved to: {results_dir}")
+        print(f"Charts saved to: {charts_dir}")
         print(f"{'='*80}\n")
     else:
         print("No results to process.")

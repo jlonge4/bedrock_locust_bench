@@ -40,10 +40,34 @@ export BASE_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0
 
 ### Run Full Test Suite
 
-Execute all permutations and generate comparison charts:
+Execute all permutations with default settings:
 
 ```bash
 python run_tests.py
+```
+
+Or customize the test run with command-line arguments:
+
+```bash
+# Test specific model with custom results directory
+python run_tests.py --model-id amazon.nova-2-lite-v1:0 --results-dir test_results/nova_run
+
+# Test only specific configurations
+python run_tests.py --region-prefixes us --service-tiers priority,flex --user-counts 30,60
+
+# Include failures in latency metrics
+python run_tests.py --include-failures
+
+# Quick test with shorter duration
+python run_tests.py --test-duration 30s --user-counts 10
+
+# Skip confirmation prompt
+python run_tests.py --yes
+```
+
+View all available options:
+```bash
+python run_tests.py --help
 ```
 
 This will:
@@ -51,11 +75,11 @@ This will:
 - Generate CSV files with detailed metrics for each test
 - Create HTML reports for each test run
 - Generate comparison charts showing P50, P95, and average latencies
-- Save all results to `test_results/` directory
+- Save all results to the specified directory
 
 ### Run Individual Tests
 
-Test a specific configuration:
+Test a specific configuration using Locust directly:
 
 ```bash
 # Set environment variables
@@ -68,20 +92,47 @@ export PROMPT_SIZE=medium
 locust -f locustfile.py --headless --users 30 --spawn-rate 10 --run-time 5m
 ```
 
-### Configuration Options
+### Command-Line Options
 
-Environment variables for `run_tests.py`:
+The `run_tests.py` script accepts the following arguments:
 
-- `BASE_MODEL_ID` - Base model ID without region prefix (default: `anthropic.claude-3-5-sonnet-20241022-v2:0`)
-- `USER_COUNTS` - Comma-separated list of user counts (default: `30,60,90`)
+- `--model-id` - Base Bedrock model ID without region prefix (default: `amazon.nova-premier-v1:0`)
+- `--results-dir` - Directory to store test results (default: `test_results`)
+- `--region-prefixes` - Comma-separated region prefixes: `us`, `global` (default: `us`)
+- `--service-tiers` - Comma-separated service tiers: `default`, `priority`, `flex` (default: all)
+- `--prompt-sizes` - Comma-separated prompt sizes: `small`, `medium`, `large` (default: all)
+- `--user-counts` - Comma-separated concurrent user counts (default: `30,60,90`)
+- `--test-duration` - Duration for each test: `30s`, `1m`, `5m`, etc. (default: `1m`)
+- `--spawn-rate` - Users spawned per second (default: `10`)
+- `--include-failures` - Include failed requests in latency metrics (default: excluded)
+- `--yes`, `-y` - Skip confirmation prompt
 
-Environment variables for `locustfile.py`:
+### Environment Variables (Alternative)
+
+You can also use environment variables instead of command-line arguments:
+
+### Environment Variables (Alternative)
+
+You can also use environment variables instead of command-line arguments:
+
+```bash
+export BASE_MODEL_ID=amazon.nova-2-lite-v1:0
+export RESULTS_DIR=test_results/baseline
+export REGION_PREFIXES=us,global
+export USER_COUNTS=30,60,90
+export INCLUDE_FAILURES=true
+python run_tests.py
+```
+
+Environment variables for `locustfile.py` (when running Locust directly):
 
 - `BASE_MODEL_ID` - Base model ID without region prefix
 - `REGION_PREFIX` - Either `us` or `global`
 - `SERVICE_TIER` - Either `default`, `priority`, or `flex`
 - `PROMPT_SIZE` - Either `small`, `medium`, or `large`
 - `PROMPTS_FILE` - Path to prompts JSON file (default: `prompts.json`)
+- `RESULTS_DIR` - Directory for test results (default: `test_results`)
+- `INCLUDE_FAILURES` - Include failed requests in latency metrics (default: `false`)
 
 ## Test Permutations
 
@@ -94,29 +145,52 @@ Each test runs for 5 minutes, so the full suite takes approximately **4.5 hours*
 
 ### CSV Reports
 Individual test results are saved as:
-- `test_results/test_{config}_stats.csv` - Detailed statistics
-- `test_results/consolidated_results_{timestamp}.csv` - All results combined
+- `{RESULTS_DIR}/test_{config}_stats.csv` - Detailed statistics
+- `{RESULTS_DIR}/consolidated_results_{timestamp}.csv` - All results combined
+- `{RESULTS_DIR}/token_data.jsonl` - Per-request token usage and response times
 
 ### HTML Reports
 Interactive HTML reports for each test:
-- `test_results/test_{config}_report.html`
+- `{RESULTS_DIR}/test_{config}_report.html`
 
 ### Charts
-Comparison charts saved to `test_results/charts/`:
+Comparison charts saved to `{RESULTS_DIR}/charts/`:
 - `avg_latency_by_config.png` - Average latency by all configurations
 - `p50_p95_comparison.png` - P50 vs P95 latencies by prompt size
 - `latency_by_prompt_size.png` - Latency metrics across prompt sizes
 - `throughput_comparison.png` - Requests/sec by configuration
 - `latency_heatmap.png` - Heatmap of service tier vs prompt size
 
+### Organizing Multiple Test Runs
+
+To keep results from different test runs separate, use the `RESULTS_DIR` variable:
+
+```bash
+# First run with baseline configuration
+export RESULTS_DIR=test_results/baseline_run
+python run_tests.py
+
+# Second run with different model
+export RESULTS_DIR=test_results/nova_run
+export BASE_MODEL_ID=amazon.nova-2-lite-v1:0
+python run_tests.py
+
+# Third run including failures in metrics
+export RESULTS_DIR=test_results/with_failures
+export INCLUDE_FAILURES=true
+python run_tests.py
+```
+
 ## Metrics Collected
 
 For each test configuration, the framework tracks:
-- Total requests and failures
+- Total requests and failures (failures excluded from latency by default)
 - Average, min, max response times
 - P50, P95, P99 latencies
 - Requests per second (throughput)
-- Token usage (logged)
+- Token usage (input, output, total per request in token_data.jsonl)
+
+**Note on Failure Handling**: By default, failed requests are excluded from latency metrics to give you accurate success-only performance. To include failures in latency calculations, set `INCLUDE_FAILURES=true`.
 
 ## Customizing Prompts
 
