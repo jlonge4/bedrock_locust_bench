@@ -16,6 +16,59 @@ The testing framework evaluates Bedrock model performance across multiple dimens
 - `run_tests.py` - Orchestration script that runs all permutations and generates charts
 - `prompts.json` - Sample prompts of varying sizes
 - `requirements.txt` - Python dependencies
+- `seq_diag.mmd` - Sequence diagram showing test execution flow
+
+## Architecture
+
+The following sequence diagram illustrates the Locust test execution flow:
+
+```mermaid
+sequenceDiagram
+    participant Locust
+    participant BedrockUser
+    participant Config
+    participant Bedrock API
+    participant FileSystem
+    
+    Locust->>+BedrockUser: Initialize User
+    BedrockUser->>Config: Load environment variables
+    Note over Config: BASE_MODEL_ID, REGION_PREFIX,<br/>SERVICE_TIER, PROMPT_SIZE
+    Config-->>BedrockUser: Configuration values
+    
+    BedrockUser->>FileSystem: Read prompts.json
+    FileSystem-->>BedrockUser: Prompt text
+    
+    BedrockUser->>BedrockUser: Build model ID & request payload
+    Note over BedrockUser: modelId: {region}.{base_model}<br/>messages, inferenceConfig
+    
+    BedrockUser->>Bedrock API: Create boto3 client
+    Note over Bedrock API: Timeout: 840s
+    BedrockUser-->>-Locust: Ready
+    
+    loop Every 1-2 seconds (wait_time)
+        Locust->>+BedrockUser: Execute @task
+        BedrockUser->>BedrockUser: Start timer
+        BedrockUser->>BedrockUser: Build request params
+        
+        BedrockUser->>+Bedrock API: converse(**params)
+        
+        alt Success
+            Bedrock API-->>BedrockUser: Response with tokens
+            BedrockUser->>BedrockUser: Calculate response_time
+            BedrockUser->>FileSystem: Append to token_data.jsonl
+            Note over FileSystem: timestamp, region, tier,<br/>tokens, response_time
+            BedrockUser->>Locust: Fire request event (success)
+        else Exception
+            Bedrock API-->>BedrockUser: Error
+            BedrockUser->>BedrockUser: Log error
+            BedrockUser->>Locust: Fire request event (failure)
+            Note over Locust: response_time=None<br/>(unless INCLUDE_FAILURES=true)
+        end
+        
+        deactivate Bedrock API
+        deactivate BedrockUser
+    end
+```
 
 ## Setup
 
