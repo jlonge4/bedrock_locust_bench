@@ -7,7 +7,7 @@ This project provides a comprehensive load testing framework for AWS Bedrock Con
 The testing framework evaluates Bedrock model performance across multiple dimensions:
 - **Region Prefixes**: `us.` (see [AWS documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/service-tiers-inference.html) for region and model compatibility)
 - **Service Tiers**: `default`, `priority`, and `flex`
-- **Prompt Sizes**: Small (~5 words), Medium (~40 words), and Large (~150 words)
+- **Prompt Sizes**: Small (500 tokens), Medium (1k tokens), and Large (2.3k tokens)
 - **User Loads**: Configurable concurrent users (default: 30, 60, 90)
 
 ## Files
